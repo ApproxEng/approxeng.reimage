@@ -1,5 +1,7 @@
 # approxeng.reimage
 
+Get with `pip install approxeng.reimage` (Python 3.7 or higher only)
+
 Rewrite disk images programmatically:
 
 * Optionally copy the disk image to keep your original files untouched
