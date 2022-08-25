@@ -9,6 +9,45 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 
+def cmdline_file(console=('serial0,115200', 'tty1'), root='PARTUUID=0ee3e8a8-02', rootfstype='ext4', fsck_repair='yes',
+                 rootwait=True, quiet=True, init='/usr/lib/raspi-config/init_resize.sh', systemd_restore_state='0',
+                 rfkill_default_state='1', **kwargs):
+    """
+    Build a string containing the desired contents of cmdline.txt in the boot partition
+    """
+
+    def param_string(key, value):
+        # If the value is None then omit
+        if value is None:
+            return None
+        # Boolean property, include if true, omit otherwise
+        if isinstance(value, bool):
+            if value:
+                return key
+            else:
+                return None
+        if isinstance(value, str):
+            return f'{key}={value}'
+        elif isinstance(value, tuple):
+            return ' '.join(f'{key}={sub_value}' for sub_value in value)
+        raise ValueError('unknown value specified')
+
+    parameters = {
+                     'console': console,
+                     'root': root,
+                     'rootfstype': rootfstype,
+                     'fsck.repair': fsck_repair,
+                     'rootwait': rootwait,
+                     'quiet': quiet,
+                     'init': init,
+                     'systemd.restore_state': systemd_restore_state,
+                     'rfkill.default_state': rfkill_default_state
+                 } | kwargs
+
+    return ' '.join(
+        param_string(name, value) for name, value in parameters.items() if param_string(name, value) is not None)
+
+
 def hosts_file(host_name):
     """
     Build a string containing the /etc/hosts file

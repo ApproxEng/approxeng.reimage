@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import List, Dict
 from uuid import uuid4
 
-import src.python.approxeng.reimage.util
+import approxeng.reimage.util
+import approxeng.reimage.config_files
 
 LOG = logging.getLogger('custom_image')
 
@@ -92,13 +93,24 @@ class ImageMount:
                     ['lsblk', '-f', '--json']))['blockdevices']:
                 if block_device['name'] == p.name:
                     for partition in block_device['children']:
+                        if 'mountpoint' in partition:
+                            mount_point = partition['mointpoint']
+                        elif 'mountpoints' in partition:
+                            if partition['mountpoints']:
+                                mount_point = partition['mountpoints'][0]
+                            else:
+                                LOG.error(f'no mount points available in partition {partition}')
+                                raise ValueError('mount point list is empty')
+                        else:
+                            LOG.error(f'no mount points available in partition {partition}')
+                            raise ValueError('no mount points available')
                         yield MountPoint(name=partition['name'],
                                          fstype=partition['fstype'],
                                          label=partition['label'],
                                          uuid=partition['uuid'],
                                          fsavail=partition['fsavail'],
                                          fsuse_percentage=partition['fsuse%'],
-                                         mount=Path(partition['mountpoint']))
+                                         mount=Path(mount_point))
 
         for partition_path in p.parent.glob(p.name.strip() + 'p*'):
             mount_path = f'/mnt/{self._uuid}-{partition_path.name}'
@@ -140,6 +152,40 @@ class ImageMount:
         if label not in self:
             raise ValueError(f'no volume with label {label} in {self.image_path_string}')
         return (self[label].mount / sub_path.strip('/')).resolve()
+
+    def ensure_directory(self, label: str, sub_path: str, mode: int = util.mode('rwxr-xr-x'), uid=0, gid=0):
+        """
+        Ensure that the specified sub-path within a given labelled mount exists and is a directory. Any new
+        directories required will be created with the mode, uid, and gid specified
+        """
+        ImageMount.ensure_directory_path(self.path(label=label, sub_path=sub_path), mode=mode, uid=uid, gid=gid)
+
+    @staticmethod
+    def ensure_directory_path(dir_path: Path, mode: int = util.mode('rwxr-xr-x'), uid=0, gid=0):
+        """
+        Ensure that the specified directory exists, creating any necessary intermediate entries. Any
+        new entries will be created with the permissions, uid, and guid specified
+        """
+
+        def build_dir(path: Path):
+            if path.exists():
+                # Complain if the path exists but is a file
+                if path.is_file():
+                    raise ValueError(f'path {path} is a file, expected directory!')
+                # Otherwise nothing to do here
+                return
+            if not path.parent.exists():
+                # If the path's parent doesn't exist go and sort that out first
+                build_dir(path.parent)
+            if path.parent.is_file():
+                # If the parent is a file that's an issue
+                raise ValueError(f'cannot create subdirectory, {path.parent} is a file!')
+            # Parent exists, is a directory, create the immediate subdirectory
+            path.mkdir(mode=mode, parents=False, exist_ok=False)
+            os.chown(path=path, uid=uid, gid=gid)
+            LOG.debug(f'created new directory {path}')
+
+        build_dir(dir_path)
 
     def write_file(self, label: str, path: str, data: str = '', append: bool = False,
                    mode: int = util.mode('rw-r--r--'), uid=0, gid=0):
@@ -228,9 +274,27 @@ class RaspberryPiOSImage(ImageMount):
                         mode=util.mode('rw-r--r--'))
         LOG.debug('written sshd configuration')
 
+    def configure_cmdline(self, **kwargs):
+        """
+        Configure cmdline.txt, writes to boot:/cmdline.txt
+
+        By default, this includes the lines to enable wi-fi (rfkill.default_state=1) and to
+        automatically resize to the full size on the card (init=/usr/lib/raspi-config/init_resize.sh).
+        Note that if auto-resize is enabled this will run on first boot, resize the partition, remove
+        this argument and reboot normally.
+
+        To remove a parameter such as init=... specify it as None in the arguments to this method. To add
+        a flag, specify a boolean value (the flag will be included if True, excluded if False)
+        """
+        self.write_file(label='boot',
+                        path='/cmdline.txt',
+                        data=config_files.cmdline_file(**kwargs),
+                        mode=util.mode('rw-r--r--'))
+        LOG.debug('written cmdline.txt')
+
     def configure_wifi(self, networks: List[config_files.Network], country='GB'):
         """
-        Configure wifi, writes to /etc/wpa_supplicant/wpa_supplicant.conf. Permissions will be set to
+        Configure wi-fi, writes to /etc/wpa_supplicant/wpa_supplicant.conf. Permissions will be set to
         root read / write only, no read access for other users.
 
         :param networks:
@@ -244,6 +308,23 @@ class RaspberryPiOSImage(ImageMount):
                         data=config_files.wpa_supplicant_file(networks=networks,
                                                               country=country),
                         mode=util.mode('rw-------'))
+
+    def enable_user_systemd_unit(self, user_name: str, unit: str, unit_name: str):
+        """
+        Create and enable a user level systemd service. TODO - Not fully implemented
+
+        :param user_name:
+            User for the service, the unit files will be created within this user's home directory
+        :param unit:
+            String containing the unit specification
+        :param unit_name:
+            Unit name, this will be used to create the unit file name by appending '.service', i.e.
+            specifying 'demo' here will create a service 'demo.service'
+        """
+        user = self.users[user_name]
+        systemd_path = f'{user.home}/.config/systemd/user'
+        user_systemd_path = self.path(label='rootfs', sub_path=systemd_path)
+        self.ensure_directory_path(dir_path=user_systemd_path, uid=user.uid, gid=user.gid)
 
     def add_ssh_keys(self, user_name: str, key_paths: List[Path]):
         """
