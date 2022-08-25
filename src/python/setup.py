@@ -15,4 +15,4 @@ setup(
     author_email='tomoinn@gmail.com',
     license='ASL2.0',
     packages=find_namespace_packages(),
-    install_requires=[])
+    install_requires=['elevate'])
