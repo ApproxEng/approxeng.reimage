@@ -1,5 +1,8 @@
 # approxeng.reimage
 
+Get with `pip install approxeng.reimage` (Python 3.7 or higher only). As this wraps command line tools to
+actually mount and open the image files, it will only work on a Linux host.
+
 Rewrite disk images programmatically:
 
 * Optionally copy the disk image to keep your original files untouched
