@@ -9,7 +9,7 @@ setup(
     name='approxeng.reimage',
     version='0.0.1',
     description='Library to modify SD card images, in particular for the Raspbery Pi OS',
-    classifiers=['Programming Language :: Python :: 3.7'],
+    classifiers=['Programming Language :: Python :: 3.10'],
     url='https://github.com/ApproxEng/approxeng.reimage/',
     author='Tom Oinn',
     author_email='tomoinn@gmail.com',
